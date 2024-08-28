@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { signup } from "../utils/auth.js";
+import { login } from "../utils/auth.js";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -7,7 +7,9 @@ const Login = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log("Login:", { email, password });
+    const data = { email, password };
+    login(data);
+    console.log("Login:");
     // You can add your API call here
   };
 
