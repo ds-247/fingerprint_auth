@@ -29,6 +29,7 @@ const corsOptions = {
 // Use CORS with the specified options
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(express.urlencoded({extended: true}));
 
 const usersFilePath = path.join(__dirname, "Users.json");
 
@@ -36,6 +37,19 @@ const usersFilePath = path.join(__dirname, "Users.json");
 const readUsersFromFile = () => {
   const usersData = fs.readFileSync(usersFilePath);
   return JSON.parse(usersData);
+};
+
+
+// Helper function to read the Users.json file
+const readUserFromFile = (email) => {
+  const usersData = fs.readFileSync(usersFilePath);
+  const user = usersData.find((user) => user.email === email);
+
+  if (user) {
+    return JSON.parse(user);
+  } else {
+    return [];
+  }
 };
 
 // Helper function to write data to the Users.json file
@@ -47,6 +61,19 @@ const writeUsersToFile = (users) => {
 app.get("/users", (req, res) => {
   const users = readUsersFromFile();
   res.json(users);
+});
+
+
+// Get specific user
+app.get("/users/:email", (req, res) => {
+  const users = readUsersFromFile();
+  const user = users.find((user) => user.email === req.params.email);
+
+  if (user) {
+    res.json(user);
+  } else {
+    res.status(404).json({ error: "User not found" });
+  }
 });
 
 // Create a new user
@@ -81,6 +108,14 @@ app.delete("/users/:email", (req, res) => {
 
   res.status(200).json({ message: "User deleted successfully" });
 });
+
+
+
+app.get("/init-register", (req, res) => {
+  console.log("init register", req.query)
+  // console.log("init register", req.params.id)
+  res.json({email : req.query.email})
+})
 
 // Start the server
 const PORT = process.env.PORT || 5000;
