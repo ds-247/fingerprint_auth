@@ -1,21 +1,26 @@
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const path = require("path");
-const fs = require("fs")
+const fs = require("fs");
 
 const app = express();
+let orgni = "";
 
+let count = 0;
 
 // List of allowed origins
 const allowedOrigins = [
-  "http://example1.com",
-  "http://example2.com",
+  "http://localhost:5500",
+  "122.160.87.56",
+  "http://localhost:3490",
   "http://localhost:5173",
 ];
 
 // CORS options to allow multiple origins
 const corsOptions = {
   origin: function (origin, callback) {
+    orgni = origin;
     // If no origin is provided (e.g., for non-browser clients), allow it
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -24,12 +29,14 @@ const corsOptions = {
       callback(new Error("Not allowed by CORS"));
     }
   },
+  credentials: true,
 };
 
 // Use CORS with the specified options
 app.use(cors(corsOptions));
+app.use(cookieParser());
 app.use(express.json());
-app.use(express.urlencoded({extended: true}));
+app.use(express.urlencoded({ extended: true }));
 
 const usersFilePath = path.join(__dirname, "Users.json");
 
@@ -38,7 +45,6 @@ const readUsersFromFile = () => {
   const usersData = fs.readFileSync(usersFilePath);
   return JSON.parse(usersData);
 };
-
 
 // Helper function to read the Users.json file
 const readUserFromFile = (email) => {
@@ -55,7 +61,7 @@ const readUserFromFile = (email) => {
 // Helper function to write data to the Users.json file
 const writeUsersToFile = (users) => {
   fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
-};
+};                                
 
 // Get all users
 app.get("/users", (req, res) => {
@@ -63,10 +69,16 @@ app.get("/users", (req, res) => {
   res.json(users);
 });
 
+app.get("/login", (req, res) => {
+  count++;
+  res.cookie("first cookie", "value is random" + count,{httpOnly: true, sameSite:false});
+  res.send(orgni);
+});
 
 // Get specific user
 app.get("/users/:email", (req, res) => {
-  const users = readUsersFromFile();
+  const email = req.params.email;
+  const users = readUsersFromFile(email);
   const user = users.find((user) => user.email === req.params.email);
 
   if (user) {
@@ -109,13 +121,11 @@ app.delete("/users/:email", (req, res) => {
   res.status(200).json({ message: "User deleted successfully" });
 });
 
-
-
 app.get("/init-register", (req, res) => {
-  console.log("init register", req.query)
+  console.log("init register", req.query);
   // console.log("init register", req.params.id)
-  res.json({email : req.query.email})
-})
+  res.json({ email: req.query.email });
+});
 
 // Start the server
 const PORT = process.env.PORT || 5000;
