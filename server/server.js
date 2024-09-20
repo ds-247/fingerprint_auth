@@ -9,13 +9,11 @@ const {
 } = require("@simplewebauthn/server");
 
 const app = express();
-const RP_ID = "app_name";
-const CLIENT_URL = "http://localhost:5173"
+const RP_ID = "localhost";
+const CLIENT_URL = "http://localhost:5173";
 
 // List of allowed origins
-const allowedOrigins = [
-  "http://localhost:5173",
-];
+const allowedOrigins = ["http://localhost:5173"];
 
 // CORS options to allow multiple origins
 const corsOptions = {
@@ -62,6 +60,21 @@ const writeUsersToFile = (users) => {
   fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
 };
 
+function  createNewUser(newUser) {
+  const users = readUsersFromFile();
+
+  // Add basic validation
+  if (!newUser.id || !newUser.email) {
+    return false;
+  }
+
+  // Add new user to the list
+  users.push(newUser);
+  writeUsersToFile(users);
+
+  return true;
+}
+
 // Get all users
 app.get("/users", (req, res) => {
   const users = readUsersFromFile();
@@ -91,19 +104,16 @@ app.get("/users/:email", (req, res) => {
 
 // Create a new user
 app.post("/users", (req, res) => {
-  const users = readUsersFromFile();
   const newUser = req.body;
 
+  const created = createNewUser(newUser)
+
   // Add basic validation
-  if (!newUser.name || !newUser.email) {
-    return res.status(400).json({ error: "Name and email are required" });
+  if (!created) {
+    return res.status(400).json({ error: "UserId and email are required" });
   }
 
-  // Add new user to the list
-  users.push(newUser);
-  writeUsersToFile(users);
-
-  res.status(201).json(newUser);
+  res.status(201).json({msg: "added user"});
 });
 
 // Delete a user by email
@@ -124,6 +134,7 @@ app.delete("/users/:email", (req, res) => {
 
 app.get("/init-registration", async (req, res) => {
   const user_email = req.query.email;
+  // console.log("requested")
 
   if (!user_email)
     return res.status(400).json({ msg: "No email provided ... " });
@@ -142,45 +153,49 @@ app.get("/init-registration", async (req, res) => {
     "regInfo",
     JSON.stringify({
       userId: options.user.id,
-      email,
+      email: user_email,
       challenge: options.challenge,
     }),
     {
       httpOnly: true,
-      maxAge: 6000,
+      maxAge: 60000,
       secure: true,
     }
   );
 
-   res.set("Access-Control-Allow-Origin", "http://localhost:5173");
+  res.set("Access-Control-Allow-Origin", "http://localhost:5173");
   res.json(options);
 });
 
-app.post("verify-registration", async (req, res) => {
-  const regInfo = JSON.parse(req.cookies.regInfo)
+app.post("/verify-registration", async (req, res) => {
+  const regInfo = JSON.parse(req.cookies.regInfo);
 
-  if(!regInfo)return res.status(400).json({msg : "Registration info not found ... "})
-  const verification = verifyRegistrationResponse({
+  if (!regInfo)
+    return res.status(400).json({ msg: "Registration info not found ... " });
+  const verification = await verifyRegistrationResponse({
     response: req.body,
     expectedChallenge: regInfo.challenge,
     expectedOrigin: CLIENT_URL,
-    expectedRPID: RP_ID
+    expectedRPID: RP_ID,
   });
 
+
   if (verification.verified) {
-    createUser(regInfo.userId, regInfo.email, {
+    createNewUser({id: regInfo.userId, email:  regInfo.email, passkey: {
       id: verification.registrationInfo.credentialID,
       publicKey: verification.registrationInfo.credentialPublicKey,
       counter: verification.registrationInfo.counter,
       deviceType: verification.registrationInfo.credentialDeviceType,
       backedUp: verification.registrationInfo.credentialBackedUP,
-      transport: req.body.transports
-    })
+      transport: req.body.transports,
+    }});
+
+    console.log(readUserFromFile(regInfo.email))
 
     res.clearCookie("regInfo");
-    return res.json({ verified: verification.verified})
+    return res.json({ verified: verification.verified });
   } else {
-    return res.status(400).json({verified: false})
+    return res.status(400).json({ verified: false });
   }
 });
 
@@ -189,45 +204,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
-
-// const { verifyRegistrationResponse } = require("@simplewebauthn/server");
-
-// // Function to verify registration response (step 2)
-// async function verifyPasskeyRegistration(response, expectedChallenge, user) {
-//   try {
-//     const verification = await verifyRegistrationResponse({
-//       response,
-//       expectedChallenge, // The challenge that you sent to the client during registration
-//       expectedOrigin: "https://yourdomain.com", // Make sure this is the domain where the request originated
-//       expectedRPID: "yourdomain.com", // RP ID you set during registration
-//       requireUserVerification: true, // Ensure the user verification (e.g. biometrics or PIN)
-//     });
-
-//     const { verified, registrationInfo } = verification;
-
-//     if (verified) {
-//       const { credentialPublicKey, credentialID, counter } = registrationInfo;
-
-//       // Store the credential information in your database
-//       // - credentialID (a unique identifier for this credential)
-//       // - credentialPublicKey (the public key used for verification later)
-//       // - counter (used to prevent replay attacks)
-//       // Example:
-//       await saveCredentialToDatabase(
-//         user.id,
-//         credentialID,
-//         credentialPublicKey,
-//         counter
-//       );
-
-//       return { success: true };
-//     }
-
-//     return { success: false, error: "Verification failed" };
-//   } catch (error) {
-//     console.error(error);
-//     return { success: false, error: error.message };
-//   }
-// }
-
