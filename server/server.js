@@ -3,24 +3,23 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const fs = require("fs");
+const {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+} = require("@simplewebauthn/server");
 
 const app = express();
-let orgni = "";
-
-let count = 0;
+const RP_ID = "app_name";
+const CLIENT_URL = "http://localhost:5173"
 
 // List of allowed origins
 const allowedOrigins = [
-  "http://localhost:5500",
-  "122.160.87.56",
-  "http://localhost:3490",
   "http://localhost:5173",
 ];
 
 // CORS options to allow multiple origins
 const corsOptions = {
   origin: function (origin, callback) {
-    orgni = origin;
     // If no origin is provided (e.g., for non-browser clients), allow it
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -54,14 +53,14 @@ const readUserFromFile = (email) => {
   if (user) {
     return JSON.parse(user);
   } else {
-    return [];
+    return {};
   }
 };
 
 // Helper function to write data to the Users.json file
 const writeUsersToFile = (users) => {
   fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
-};                                
+};
 
 // Get all users
 app.get("/users", (req, res) => {
@@ -70,9 +69,11 @@ app.get("/users", (req, res) => {
 });
 
 app.get("/login", (req, res) => {
-  count++;
-  res.cookie("first cookie", "value is random" + count,{httpOnly: true, sameSite:false});
-  res.send(orgni);
+  res.cookie("first cookie", "value is random", {
+    httpOnly: true,
+    sameSite: false,
+  });
+  res.send("logged in successfully");
 });
 
 // Get specific user
@@ -121,10 +122,66 @@ app.delete("/users/:email", (req, res) => {
   res.status(200).json({ message: "User deleted successfully" });
 });
 
-app.get("/init-register", (req, res) => {
-  console.log("init register", req.query);
-  // console.log("init register", req.params.id)
-  res.json({ email: req.query.email });
+app.get("/init-registration", async (req, res) => {
+  const user_email = req.query.email;
+
+  if (!user_email)
+    return res.status(400).json({ msg: "No email provided ... " });
+
+  const user = readUserFromFile(user_email);
+  if (Object.keys(user).length != 0)
+    return res.status(404).json({ msg: "User Already exists ..." });
+
+  const options = await generateRegistrationOptions({
+    rpID: RP_ID,
+    rpName: "Dj Dips",
+    userName: user_email,
+  });
+
+  res.cookie(
+    "regInfo",
+    JSON.stringify({
+      userId: options.user.id,
+      email,
+      challenge: options.challenge,
+    }),
+    {
+      httpOnly: true,
+      maxAge: 6000,
+      secure: true,
+    }
+  );
+
+   res.set("Access-Control-Allow-Origin", "http://localhost:5173");
+  res.json(options);
+});
+
+app.post("verify-registration", async (req, res) => {
+  const regInfo = JSON.parse(req.cookies.regInfo)
+
+  if(!regInfo)return res.status(400).json({msg : "Registration info not found ... "})
+  const verification = verifyRegistrationResponse({
+    response: req.body,
+    expectedChallenge: regInfo.challenge,
+    expectedOrigin: CLIENT_URL,
+    expectedRPID: RP_ID
+  });
+
+  if (verification.verified) {
+    createUser(regInfo.userId, regInfo.email, {
+      id: verification.registrationInfo.credentialID,
+      publicKey: verification.registrationInfo.credentialPublicKey,
+      counter: verification.registrationInfo.counter,
+      deviceType: verification.registrationInfo.credentialDeviceType,
+      backedUp: verification.registrationInfo.credentialBackedUP,
+      transport: req.body.transports
+    })
+
+    res.clearCookie("regInfo");
+    return res.json({ verified: verification.verified})
+  } else {
+    return res.status(400).json({verified: false})
+  }
 });
 
 // Start the server
@@ -132,3 +189,45 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+
+// const { verifyRegistrationResponse } = require("@simplewebauthn/server");
+
+// // Function to verify registration response (step 2)
+// async function verifyPasskeyRegistration(response, expectedChallenge, user) {
+//   try {
+//     const verification = await verifyRegistrationResponse({
+//       response,
+//       expectedChallenge, // The challenge that you sent to the client during registration
+//       expectedOrigin: "https://yourdomain.com", // Make sure this is the domain where the request originated
+//       expectedRPID: "yourdomain.com", // RP ID you set during registration
+//       requireUserVerification: true, // Ensure the user verification (e.g. biometrics or PIN)
+//     });
+
+//     const { verified, registrationInfo } = verification;
+
+//     if (verified) {
+//       const { credentialPublicKey, credentialID, counter } = registrationInfo;
+
+//       // Store the credential information in your database
+//       // - credentialID (a unique identifier for this credential)
+//       // - credentialPublicKey (the public key used for verification later)
+//       // - counter (used to prevent replay attacks)
+//       // Example:
+//       await saveCredentialToDatabase(
+//         user.id,
+//         credentialID,
+//         credentialPublicKey,
+//         counter
+//       );
+
+//       return { success: true };
+//     }
+
+//     return { success: false, error: "Verification failed" };
+//   } catch (error) {
+//     console.error(error);
+//     return { success: false, error: error.message };
+//   }
+// }
+
