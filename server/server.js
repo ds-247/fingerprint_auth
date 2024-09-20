@@ -6,6 +6,8 @@ const fs = require("fs");
 const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
 } = require("@simplewebauthn/server");
 
 const app = express();
@@ -45,11 +47,11 @@ const readUsersFromFile = () => {
 
 // Helper function to read the Users.json file
 const readUserFromFile = (email) => {
-  const usersData = fs.readFileSync(usersFilePath);
-  const user = usersData.find((user) => user.email === email);
+  const users = readUsersFromFile();
+  const user = users.find((user) => user.email === email);
 
   if (user) {
-    return JSON.parse(user);
+    return user;
   } else {
     return {};
   }
@@ -60,7 +62,7 @@ const writeUsersToFile = (users) => {
   fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
 };
 
-function  createNewUser(newUser) {
+function createNewUser(newUser) {
   const users = readUsersFromFile();
 
   // Add basic validation
@@ -75,25 +77,21 @@ function  createNewUser(newUser) {
   return true;
 }
 
+function updateUserCounter(email, counter) {
+  const user = readUserFromFile(email);
+  user.passKey.counter = counter;
+}
+
 // Get all users
 app.get("/users", (req, res) => {
   const users = readUsersFromFile();
   res.json(users);
 });
 
-app.get("/login", (req, res) => {
-  res.cookie("first cookie", "value is random", {
-    httpOnly: true,
-    sameSite: false,
-  });
-  res.send("logged in successfully");
-});
-
 // Get specific user
 app.get("/users/:email", (req, res) => {
   const email = req.params.email;
-  const users = readUsersFromFile(email);
-  const user = users.find((user) => user.email === req.params.email);
+  const user = readUserFromFile(email);
 
   if (user) {
     res.json(user);
@@ -106,14 +104,14 @@ app.get("/users/:email", (req, res) => {
 app.post("/users", (req, res) => {
   const newUser = req.body;
 
-  const created = createNewUser(newUser)
+  const created = createNewUser(newUser);
 
   // Add basic validation
   if (!created) {
     return res.status(400).json({ error: "UserId and email are required" });
   }
 
-  res.status(201).json({msg: "added user"});
+  res.status(201).json({ msg: "added user" });
 });
 
 // Delete a user by email
@@ -172,6 +170,7 @@ app.post("/verify-registration", async (req, res) => {
 
   if (!regInfo)
     return res.status(400).json({ msg: "Registration info not found ... " });
+
   const verification = await verifyRegistrationResponse({
     response: req.body,
     expectedChallenge: regInfo.challenge,
@@ -179,23 +178,109 @@ app.post("/verify-registration", async (req, res) => {
     expectedRPID: RP_ID,
   });
 
+  // console.log("transport while registering" , req.body.transport)
 
   if (verification.verified) {
-    createNewUser({id: regInfo.userId, email:  regInfo.email, passkey: {
-      id: verification.registrationInfo.credentialID,
-      publicKey: verification.registrationInfo.credentialPublicKey,
-      counter: verification.registrationInfo.counter,
-      deviceType: verification.registrationInfo.credentialDeviceType,
-      backedUp: verification.registrationInfo.credentialBackedUP,
-      transport: req.body.transports,
-    }});
-
-    console.log(readUserFromFile(regInfo.email))
+    createNewUser({
+      id: regInfo.userId,
+      email: regInfo.email,
+      passkey: {
+        id: verification.registrationInfo.credentialID,
+        publicKey: verification.registrationInfo.credentialPublicKey,
+        counter: verification.registrationInfo.counter,
+        deviceType: verification.registrationInfo.credentialDeviceType,
+        backedUp: verification.registrationInfo.credentialBackedUp,
+        // transport: req.body.transports,
+      },
+    }); 
 
     res.clearCookie("regInfo");
     return res.json({ verified: verification.verified });
   } else {
     return res.status(400).json({ verified: false });
+  }
+});
+
+app.get("/init-auth", async (req, res) => {
+  const user_email = req.query.email;
+
+  if (!user_email)
+    return res.status(400).json({ msg: "No email provided ... " });
+
+  const user = readUserFromFile(user_email);
+
+  if (Object.keys(user).length == 0)
+    return res.status(404).json({ msg: "User doesnt exists ..." });
+
+  const options = await generateAuthenticationOptions({
+    rpID: RP_ID,
+    allowCredentials: [
+      {
+        id: user.passkey.id,
+        type: "public-key",
+        // transports: user.passkey.transports,
+      },
+    ],
+  });
+
+  res.cookie(
+    "authInfo",
+    JSON.stringify({
+      userId: user.id,
+      email: user.email,
+      challenge: options.challenge,
+    }),
+    {
+      httpOnly: true,
+      maxAge: 60000,
+      secure: true,
+    }
+  );
+
+  res.json(options);
+});
+
+app.post("/verify-auth", async (req, res) => {
+  const authInfo = JSON.parse(req.cookies.authInfo);
+
+  if (!authInfo)
+    return res.status(400).json({ msg: "Authentication info not found ... " });
+
+  const user = readUserFromFile(authInfo.email);
+  if (user == null || user.passkey.id != req.body.id) {
+    return res.status(400).json({ error: "Invalid User" });
+  }
+
+  // console.log(req.body)/
+  console.log(
+    user.passkey.id,
+    "pass key id",
+    user.passkey.publicKey,
+    " public key",
+    user.passkey.counter,
+    " counter",
+    user.passkey.transports
+  , " transports");
+
+  const verification = await verifyAuthenticationResponse({
+    response: req.body,
+    expectedChallenge: authInfo.challenge,
+    expectedOrigin: CLIENT_URL,
+    expectedRPID: RP_ID,
+    authenticator: {
+      credentialID: user.passkey.id,
+      credentialPublicKey: user.passkey.publicKey,
+      counter: user.passkey.counter,
+      // transports: user.passkey.transports
+    }
+  });
+
+  if(verification.verified){
+    updateUserCounter(user.email, verification.authenticationInfo.newCounter);
+    res.clearCookie("authInfo");
+    return res.json({verified: verification.verified})
+  }else{
+    return res.status(400).json({verified: false, error: "Verification failed"})
   }
 });
 

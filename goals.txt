@@ -1,2 +1,4 @@
 1. Code refactoring : db functions should be extracted
 2. Check of no duplicate user added / or / if two entries with same email means one user multiple pass keys
+3. Change all the user finding by user id instead of user email
+4. check why user with same email cant register more than one pass key ?
