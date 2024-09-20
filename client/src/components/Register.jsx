@@ -7,9 +7,9 @@ const Register = () => {
   const [password, setPassword] = useState("");
 
   const handleSubmit = (e) => {
-      e.preventDefault();
-      const data = { name, email, password };
-      signup(data);
+    e.preventDefault();
+    const data = { name, email, password };
+    signup(data);
     console.log("Register:", { name, email, password });
     // You can add your API call here
   };
