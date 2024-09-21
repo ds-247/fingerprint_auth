@@ -9,7 +9,6 @@ const Login = () => {
     e.preventDefault();
     const data = { email, password };
     login(data);
-    console.log("Login:");
     // You can add your API call here
   };
 
